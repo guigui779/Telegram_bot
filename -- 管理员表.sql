@@ -99,6 +99,9 @@ CREATE POLICY "service_all" ON tg_settings FOR ALL USING (true) WITH CHECK (true
 INSERT INTO tg_settings (key, value) VALUES
   ('payment_address', 'TRC20: 待设置'),
   ('payment_backup', ''),
+  ('api_url', 'https://hui.up.railway.app'),
+  ('api_url_main', 'https://hui.up.railway.app'),
+  ('api_url_backup', ''),
   ('usage_instructions', '📖 平台使用说明
 
 1️⃣ 购买的授权码会自动存入当前机器人
@@ -108,6 +111,7 @@ INSERT INTO tg_settings (key, value) VALUES
   ('news_content', '📰 云际会议资讯
 
 暂无最新资讯'),
+  ('web_url', 'https://www.example.com'),
   ('download_url', 'https://www.example.com'),
   ('purchase_notice', '📦 购买须知
 

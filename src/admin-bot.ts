@@ -145,7 +145,7 @@ function backKb(cat: string) {
 
 function apiUrlKb() {
 	return new InlineKeyboard()
-		.text('🔹 主接口地址', 'adm_ask:apiurl_main')
+		.text('🔹 当前接口地址', 'adm_ask:apiurl_main')
 		.text('🔸 备用接口地址', 'adm_ask:apiurl_backup')
 		.row()
 		.text('⬅️ 返回', 'adm_cat:admin')
@@ -344,32 +344,35 @@ async function showRooms(ctx: any) {
 }
 
 async function showHealth(ctx: any, manual = false) {
-	const health = manual ? await api.manualHealthCheck() : await api.getHealth();
-	if (!health) {
-		await ctx.reply(manual ? '❌ 手动巡检失败' : '❌ 获取健康状态失败', { reply_markup: backKb('admin') });
-		return;
-	}
-	const interfaceMain = (await db.getSetting('api_url_main')) || (await db.getSetting('api_url')) || config.apiUrl;
-	const interfaceBackup = (await db.getSetting('api_url_backup')) || '未设置';
-	const primary = health.primary || {};
-	const activeServer = health.activeServer === 'fallback' ? '备用接口' : '主接口';
-	const overallHealthy = primary.healthy ? '正常' : '异常';
-	const text = [
+	const currentUrl = ((await db.getSetting('api_url')) || config.apiUrl).replace(/\/$/, '');
+	const backupSettings = await db.getSettingsByPrefix('api_url_backup');
+
+	const currentHealthy = await api.checkUrlHealth(currentUrl, manual);
+
+	const lines: string[] = [
 		manual ? '🔄 <b>手动健康检查</b>' : '🩺 <b>健康状态</b>',
 		'',
-		`主接口地址: ${interfaceMain}`,
-		`备用接口地址: ${interfaceBackup}`,
-		'',
-		`当前生效: ${activeServer}`,
-		`当前状态: ${overallHealthy}`,
-		`上次检查: ${primary.lastChecked || '未知'}`,
-	].join('\n');
+		`🔹 当前接口: ${currentUrl}`,
+		`   状态: ${currentHealthy ? '✅ 正常' : '❌ 异常'}`,
+	];
+
+	if (backupSettings.length === 0) {
+		lines.push('', '🔸 备用接口: 未设置');
+	} else {
+		for (const item of backupSettings) {
+			const url = item.value.replace(/\/$/, '');
+			if (!url) continue;
+			const healthy = await api.checkUrlHealth(url, manual);
+			lines.push('', `🔸 备用接口: ${url}`, `   状态: ${healthy ? '✅ 正常' : '❌ 异常'}`);
+		}
+	}
+
 	const kb = new InlineKeyboard()
 		.text('🔄 立即巡检', 'adm_do:healthcheck')
 		.row()
 		.text('⬅️ 返回', 'adm_cat:admin')
 		.text('🏠 主菜单', 'adm_back');
-	await ctx.reply(text, { parse_mode: 'HTML', reply_markup: kb });
+	await ctx.reply(lines.join('\n'), { parse_mode: 'HTML', reply_markup: kb });
 }
 
 async function showRecordings(ctx: any) {
@@ -589,10 +592,10 @@ export function createAdminBot(): Bot {
 			return;
 		}
 		if (sub === 'apiurlmenu') {
-			const currentMain = (await db.getSetting('api_url_main')) || (await db.getSetting('api_url')) || config.apiUrl;
+			const currentMain = (await db.getSetting('api_url')) || config.apiUrl;
 			const currentBackup = (await db.getSetting('api_url_backup')) || '未设置';
 			await ctx.reply(
-				`🔗 <b>接口地址管理</b>\n\n🔹 主接口地址:\n<code>${currentMain}</code>\n\n🔸 备用接口地址:\n<code>${currentBackup}</code>`,
+				`🔗 <b>接口地址管理</b>\n\n🔹 当前接口地址:\n<code>${currentMain}</code>\n\n🔸 备用接口地址:\n<code>${currentBackup}</code>`,
 				{ parse_mode: 'HTML', reply_markup: apiUrlKb() },
 			);
 			return;
@@ -694,8 +697,8 @@ export function createAdminBot(): Bot {
 		}
 		if (sub === 'apiurl_main') {
 			setState(userId, 'wait_apiurl_main');
-			const currentApiUrl = (await db.getSetting('api_url_main')) || (await db.getSetting('api_url')) || config.apiUrl;
-			await ctx.reply(`🔹 请发送新的主接口地址\n\n当前地址:\n<code>${currentApiUrl}</code>`, {
+			const currentApiUrl = (await db.getSetting('api_url')) || config.apiUrl;
+			await ctx.reply(`🔹 请发送新的当前接口地址\n\n当前地址:\n<code>${currentApiUrl}</code>`, {
 				parse_mode: 'HTML',
 				reply_markup: apiUrlKb(),
 			});
@@ -948,11 +951,11 @@ export function createAdminBot(): Bot {
 			const ok = /^https?:\/\//i.test(text)
 				? (await db.setSetting('api_url_main', text)) && (await db.setSetting('api_url', text))
 				: false;
-			await ctx.reply(ok ? '✅ 主接口地址已更新' : '❌ 地址格式错误，请以 http:// 或 https:// 开头', {
+			await ctx.reply(ok ? '✅ 当前接口地址已更新' : '❌ 地址格式错误，请以 http:// 或 https:// 开头', {
 				reply_markup: apiUrlKb(),
 			});
 			if (ok) {
-				await notifyRoots(bot, userId, '修改主接口地址', [`地址: <code>${text}</code>`]);
+				await notifyRoots(bot, userId, '修改当前接口地址', [`地址: <code>${text}</code>`]);
 			}
 			return;
 		}

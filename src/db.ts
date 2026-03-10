@@ -373,6 +373,11 @@ export async function getSetting(key: string): Promise<string | null> {
   return data?.value || null;
 }
 
+export async function getSettingsByPrefix(prefix: string): Promise<{ key: string; value: string }[]> {
+  const { data } = await supabase.from('tg_settings').select('key,value').like('key', `${prefix}%`);
+  return (data || []).filter((item: any) => item.value);
+}
+
 export async function setSetting(key: string, value: string): Promise<boolean> {
   const { error } = await supabase
     .from('tg_settings')

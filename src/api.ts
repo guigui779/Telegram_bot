@@ -7,7 +7,7 @@ const headers = {
 };
 
 async function getApiBaseUrls(): Promise<{ primary: string; backup: string }> {
-  const primary = ((await db.getSetting('api_url_main')) || (await db.getSetting('api_url')) || config.apiUrl).replace(/\/$/, '');
+  const primary = ((await db.getSetting('api_url')) || config.apiUrl).replace(/\/$/, '');
   const backup = ((await db.getSetting('api_url_backup')) || '').replace(/\/$/, '');
   return { primary, backup };
 }
@@ -95,6 +95,19 @@ export async function getAllInvites(): Promise<any[]> {
     return (data as any).invites || [];
   } catch {
     return [];
+  }
+}
+
+/** 检查指定 URL 的健康状态 */
+export async function checkUrlHealth(url: string, manual = false): Promise<boolean> {
+  try {
+    const baseUrl = url.replace(/\/$/, '');
+    const endpoint = manual ? '/api/health/check' : '/api/health';
+    const init: RequestInit = manual ? { method: 'POST', headers } : { headers };
+    const res = await fetch(`${baseUrl}${endpoint}`, init);
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 
