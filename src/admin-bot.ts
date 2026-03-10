@@ -17,7 +17,7 @@ type AdminState =
 	| 'wait_weburl'
 	| 'wait_downloadurl'
 	| 'wait_apiurl_main'
-	| 'wait_apiurl_backup'
+	| 'wait_apiurl_add'
 	| 'wait_support'
 	| 'wait_sendcodes'
 	| 'wait_delcode'
@@ -41,7 +41,7 @@ const BTN_SUPPORT = '💬 咨询官方客服';
 const BTN_NEWS = '📰 云际会议资讯';
 const ROOT_IDS = new Set(config.initialAdminIds);
 const ROOT_ONLY_CATEGORIES = new Set(['admin', 'pkg', 'wallet', 'settings']);
-const ROOT_ONLY_DO_ACTIONS = new Set(['listadmins', 'listpkgs', 'health', 'apiurlmenu', 'healthcheck', 'recordings']);
+const ROOT_ONLY_DO_ACTIONS = new Set(['listadmins', 'listpkgs', 'health', 'apiurlmenu', 'healthcheck', 'recordings', 'apiurl_dellist']);
 const ROOT_ONLY_ASK_ACTIONS = new Set([
 	'addbot',
 	'delbot',
@@ -56,7 +56,7 @@ const ROOT_ONLY_ASK_ACTIONS = new Set([
 	'weburl',
 	'downloadurl',
 	'apiurl_main',
-	'apiurl_backup',
+	'apiurl_add',
 	'support',
 	'startrecord',
 	'stoprecord',
@@ -75,7 +75,7 @@ const ROOT_ONLY_STATES = new Set<AdminState>([
 	'wait_weburl',
 	'wait_downloadurl',
 	'wait_apiurl_main',
-	'wait_apiurl_backup',
+	'wait_apiurl_add',
 	'wait_support',
 	'wait_startrecord',
 	'wait_stoprecord',
@@ -145,8 +145,10 @@ function backKb(cat: string) {
 
 function apiUrlKb() {
 	return new InlineKeyboard()
-		.text('🔹 当前接口地址', 'adm_ask:apiurl_main')
-		.text('🔸 备用接口地址', 'adm_ask:apiurl_backup')
+		.text('✏️ 修改当前接口', 'adm_ask:apiurl_main')
+		.row()
+		.text('➕ 添加备用接口', 'adm_ask:apiurl_add')
+		.text('🗑 删除备用接口', 'adm_do:apiurl_dellist')
 		.row()
 		.text('⬅️ 返回', 'adm_cat:admin')
 		.text('🏠 主菜单', 'adm_back');
@@ -190,7 +192,7 @@ function catMenu(cat: string, userId: number) {
 				.text('✏️ 编辑资讯', 'adm_ask:news')
 				.row()
 				.text('🩺 健康状态', 'adm_do:health')
-				.text('🔗 接口地址更换', 'adm_do:apiurlmenu')
+				.text('🔗 接口管理', 'adm_do:apiurlmenu')
 				.text('☎️ 客服账号', 'adm_ask:support')
 				.row()
 				.text('🎥 录制列表', 'adm_do:recordings')
@@ -344,7 +346,7 @@ async function showRooms(ctx: any) {
 }
 
 async function showHealth(ctx: any, manual = false) {
-	const currentUrl = ((await db.getSetting('api_url')) || config.apiUrl).replace(/\/$/, '');
+	const currentUrl = ((await db.getSetting('api_url')) || '').replace(/\/$/, '');
 	const backupSettings = await db.getSettingsByPrefix('api_url_backup');
 
 	const currentHealthy = await api.checkUrlHealth(currentUrl, manual);
@@ -592,12 +594,36 @@ export function createAdminBot(): Bot {
 			return;
 		}
 		if (sub === 'apiurlmenu') {
-			const currentMain = (await db.getSetting('api_url')) || config.apiUrl;
-			const currentBackup = (await db.getSetting('api_url_backup')) || '未设置';
-			await ctx.reply(
-				`🔗 <b>接口地址管理</b>\n\n🔹 当前接口地址:\n<code>${currentMain}</code>\n\n🔸 备用接口地址:\n<code>${currentBackup}</code>`,
-				{ parse_mode: 'HTML', reply_markup: apiUrlKb() },
-			);
+			const currentMain = (await db.getSetting('api_url')) || '未设置';
+			const backups = await db.getSettingsByPrefix('api_url_backup');
+			const lines = [
+				'🔗 <b>接口地址管理</b>',
+				'',
+				`🔹 当前接口:`,
+				`<code>${currentMain}</code>`,
+			];
+			if (backups.length === 0) {
+				lines.push('', '🔸 备用接口: 无');
+			} else {
+				for (let i = 0; i < backups.length; i++) {
+					lines.push('', `🔸 备用接口 ${i + 1}:`, `<code>${backups[i].value}</code>`);
+				}
+			}
+			await ctx.reply(lines.join('\n'), { parse_mode: 'HTML', reply_markup: apiUrlKb() });
+			return;
+		}
+		if (sub === 'apiurl_dellist') {
+			const backups = await db.getSettingsByPrefix('api_url_backup');
+			if (backups.length === 0) {
+				await ctx.reply('🔸 暂无备用接口可删除', { reply_markup: apiUrlKb() });
+				return;
+			}
+			const kb = new InlineKeyboard();
+			for (const item of backups) {
+				kb.text(`🗑 ${item.value}`, `adm_delapiurl:${item.key}`).row();
+			}
+			kb.text('⬅️ 返回', 'adm_do:apiurlmenu').text('🏠 主菜单', 'adm_back');
+			await ctx.reply('🗑 选择要删除的备用接口：', { reply_markup: kb });
 			return;
 		}
 		if (sub === 'healthcheck') {
@@ -697,17 +723,16 @@ export function createAdminBot(): Bot {
 		}
 		if (sub === 'apiurl_main') {
 			setState(userId, 'wait_apiurl_main');
-			const currentApiUrl = (await db.getSetting('api_url')) || config.apiUrl;
+			const currentApiUrl = (await db.getSetting('api_url')) || '未设置';
 			await ctx.reply(`🔹 请发送新的当前接口地址\n\n当前地址:\n<code>${currentApiUrl}</code>`, {
 				parse_mode: 'HTML',
 				reply_markup: apiUrlKb(),
 			});
 			return;
 		}
-		if (sub === 'apiurl_backup') {
-			setState(userId, 'wait_apiurl_backup');
-			const currentApiUrl = (await db.getSetting('api_url_backup')) || '未设置';
-			await ctx.reply(`🔸 请发送新的备用接口地址\n\n当前地址:\n<code>${currentApiUrl}</code>`, {
+		if (sub === 'apiurl_add') {
+			setState(userId, 'wait_apiurl_add');
+			await ctx.reply('➕ 请发送要添加的备用接口地址\n\n格式: https://xxx.example.com', {
 				parse_mode: 'HTML',
 				reply_markup: apiUrlKb(),
 			});
@@ -772,6 +797,21 @@ export function createAdminBot(): Bot {
 		await ctx.reply(`📤 已选择机器人 ID: ${botId}\n\n请发送：数量 小时\n例：10 12`, {
 			reply_markup: backKb('auth'),
 		});
+	});
+
+	bot.callbackQuery(/^adm_delapiurl:(.+)$/, async (ctx) => {
+		const userId = ctx.from?.id;
+		if (!userId || !isRoot(userId)) {
+			await ctx.answerCallbackQuery({ text: '⛔ 仅ROOT可操作', show_alert: true });
+			return;
+		}
+		await ctx.answerCallbackQuery();
+		const key = ctx.match[1];
+		const ok = await db.deleteSetting(key);
+		await ctx.reply(ok ? `✅ 已删除备用接口（${key}）` : '❌ 删除失败', { reply_markup: apiUrlKb() });
+		if (ok) {
+			await notifyRoots(bot, userId, '删除备用接口', [`Key: <code>${key}</code>`]);
+		}
 	});
 
 	bot.on('message:text', async (ctx) => {
@@ -960,13 +1000,17 @@ export function createAdminBot(): Bot {
 			return;
 		}
 
-		if (state.action === 'wait_apiurl_backup') {
-			const ok = /^https?:\/\//i.test(text) ? await db.setSetting('api_url_backup', text) : false;
-			await ctx.reply(ok ? '✅ 备用接口地址已更新' : '❌ 地址格式错误，请以 http:// 或 https:// 开头', {
-				reply_markup: apiUrlKb(),
-			});
+		if (state.action === 'wait_apiurl_add') {
+			if (!/^https?:\/\//i.test(text)) {
+				await ctx.reply('❌ 地址格式错误，请以 http:// 或 https:// 开头', { reply_markup: apiUrlKb() });
+				return;
+			}
+			const existing = await db.getSettingsByPrefix('api_url_backup');
+			const nextKey = existing.length === 0 ? 'api_url_backup' : `api_url_backup_${existing.length + 1}`;
+			const ok = await db.setSetting(nextKey, text);
+			await ctx.reply(ok ? `✅ 备用接口已添加（${nextKey}）` : '❌ 添加失败', { reply_markup: apiUrlKb() });
 			if (ok) {
-				await notifyRoots(bot, userId, '修改备用接口地址', [`地址: <code>${text}</code>`]);
+				await notifyRoots(bot, userId, '添加备用接口', [`地址: <code>${text}</code>`]);
 			}
 			return;
 		}

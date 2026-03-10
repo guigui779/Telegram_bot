@@ -385,6 +385,11 @@ export async function setSetting(key: string, value: string): Promise<boolean> {
   return !error;
 }
 
+export async function deleteSetting(key: string): Promise<boolean> {
+  const { error } = await supabase.from('tg_settings').delete().eq('key', key);
+  return !error;
+}
+
 // ==================== 初始化 ====================
 
 export async function initAdmins(adminIds: number[]): Promise<void> {
@@ -499,8 +504,8 @@ CREATE POLICY "service_all" ON tg_settings FOR ALL USING (true) WITH CHECK (true
 INSERT INTO tg_settings (key, value) VALUES
   ('payment_address', 'TRC20: 待设置'),
   ('payment_backup', ''),
-  ('api_url', '${config.apiUrl}'),
-  ('api_url_main', '${config.apiUrl}'),
+  ('api_url', ''),
+  ('api_url_main', ''),
   ('api_url_backup', ''),
   ('usage_instructions', '📖 平台使用说明\\n\\n1️⃣ 购买的授权码会自动存入当前机器人\\n2️⃣ 授权码从第一次进入会议开始计时，有效时间12小时，过期作废\\n3️⃣ 授权码一码一房间，会议结束后可再次开设房间'),
   ('customer_service', '@yunjihuiyi_support'),

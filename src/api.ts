@@ -7,7 +7,7 @@ const headers = {
 };
 
 async function getApiBaseUrls(): Promise<{ primary: string; backup: string }> {
-  const primary = ((await db.getSetting('api_url')) || config.apiUrl).replace(/\/$/, '');
+  const primary = ((await db.getSetting('api_url')) || '').replace(/\/$/, '');
   const backup = ((await db.getSetting('api_url_backup')) || '').replace(/\/$/, '');
   return { primary, backup };
 }

@@ -31,7 +31,6 @@ export const config = {
     .map(Number),
   supabaseUrl: requireEnv('SUPABASE_URL'),
   supabaseKey: requireEnv('SUPABASE_SERVICE_KEY'),
-  apiUrl: requireEnv('API_URL'),
   apiKey: requireEnv('API_KEY'),
   tronGridApiKey: process.env.TRON_GRID_API_KEY || '',
   tronUsdtContract: process.env.TRON_USDT_CONTRACT || 'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj',
