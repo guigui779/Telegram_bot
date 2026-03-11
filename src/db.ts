@@ -448,7 +448,7 @@ export async function getBotCodesDetail(botId: number): Promise<CodeDetail[]> {
     if (inv) {
       const expiresAt = inv.expires_at ? new Date(inv.expires_at).getTime() : null;
       const isExpired = expiresAt !== null && expiresAt <= now;
-      const isInUse = !!inv.room_name && !isExpired;
+      const isInUse = !!inv.activated_at && !isExpired;
       result.push({
         code: c.code,
         room_name: inv.room_name,
@@ -489,7 +489,7 @@ export async function getCodeDetail(code: string): Promise<CodeDetail | null> {
   const now = Date.now();
   const expiresAt = data.expires_at ? new Date(data.expires_at).getTime() : null;
   const isExpired = expiresAt !== null && expiresAt <= now;
-  const isInUse = !!data.room_name && !isExpired;
+  const isInUse = !!data.activated_at && !isExpired;
 
   return {
     code: data.code,
