@@ -174,10 +174,11 @@ function catMenu(cat: string, userId: number) {
 		case 'auth':
 			return new InlineKeyboard()
 				.text('📤 下发授权码', 'adm_ask:sendcodes')
-				.text('🗑 删除单个授权码', 'adm_ask:delcode')
-				.text('♻️ 释放房间', 'adm_ask:releasecode')
+				.text('🗑 删除授权码', 'adm_do:delcodes_botlist')
 				.row()
+				.text('♻️ 释放房间', 'adm_ask:releasecode')
 				.text('🔍 授权码详情', 'adm_ask:codeinfo')
+				.row()
 				.text('📊 单个机器人统计', 'adm_ask:botstats')
 				.text('🔢 全平台统计', 'adm_do:totalstats')
 				.row()
@@ -278,32 +279,83 @@ async function showPackages(ctx: any) {
 	await ctx.reply(msg.trim(), { parse_mode: 'HTML', reply_markup: backKb('pkg') });
 }
 
-async function showBotStats(ctx: any, botId: number) {
-	const codes = await db.getCodesByBot(botId);
-	const total = codes.length;
-	const used = codes.filter((item) => item.used).length;
-	const unused = total - used;
-	await ctx.reply(
-		`📊 <b>机器人授权码统计</b>\n\n机器人ID: <code>${botId}</code>\n总数: ${total}\n未使用: ${unused}\n已使用: ${used}`,
-		{ parse_mode: 'HTML', reply_markup: backKb('auth') },
-	);
+function formatDuration(seconds: number): string {
+	if (seconds <= 0) return '已到期';
+	const d = Math.floor(seconds / 86400);
+	const h = Math.floor((seconds % 86400) / 3600);
+	const m = Math.floor((seconds % 3600) / 60);
+	const parts: string[] = [];
+	if (d > 0) parts.push(`${d}天`);
+	if (h > 0) parts.push(`${h}小时`);
+	if (m > 0) parts.push(`${m}分钟`);
+	return parts.length > 0 ? parts.join('') : '不到1分钟';
 }
 
-function formatInviteInfo(invite: any) {
-	const code = invite?.code || '未知';
-	const roomName = invite?.roomName || invite?.room_name || '未绑定';
-	const identity = invite?.identity || '未绑定';
-	const expiresAt = invite?.expiresAt || invite?.expires_at || '未知';
-	const used = invite?.used ? '是' : '否';
-	const revoked = invite?.revoked ? '是' : '否';
+async function showBotStats(ctx: any, botId: number) {
+	const bot = await db.getSaleBotById(botId);
+	if (!bot) {
+		await ctx.reply('❌ 未找到该机器人', { reply_markup: backKb('auth') });
+		return;
+	}
+	const details = await db.getBotCodesDetail(botId);
+	if (details.length === 0) {
+		await ctx.reply(`📊 <b>${bot.bot_name || bot.bot_username || '未知'}</b> (ID:${botId})\n\n暂无授权码`, { parse_mode: 'HTML', reply_markup: backKb('auth') });
+		return;
+	}
+
+	const unused = details.filter((d) => d.status === 'unused');
+	const inUse = details.filter((d) => d.status === 'in_use');
+	const expired = details.filter((d) => d.status === 'expired');
+
+	let text = `📊 <b>机器人授权码详情</b>\n\n📱 <b>${bot.bot_name || bot.bot_username || '未知'}</b>  (ID:${botId})`;
+	text += `\n总数: ${details.length} | 未使用: ${unused.length} | 使用中: ${inUse.length} | 过期: ${expired.length}\n`;
+
+	if (unused.length > 0) {
+		text += `\n🟢 <b>未使用 (${unused.length}个)</b>\n`;
+		text += unused.map((d) => `<code>${d.code}</code>`).join('  ') + '\n';
+	}
+
+	if (inUse.length > 0) {
+		text += `\n🔵 <b>使用中 (${inUse.length}个)</b>\n`;
+		for (const d of inUse) {
+			const remain = d.remaining_seconds != null ? formatDuration(d.remaining_seconds) : '无限';
+			text += `<code>${d.code}</code> · ${d.room_name || '未知房间'} · 剩余${remain}\n`;
+		}
+	}
+
+	if (expired.length > 0) {
+		text += `\n🔴 <b>已过期 (${expired.length}个)</b>\n`;
+		text += expired.map((d) => `<code>${d.code}</code>`).join('  ') + '\n';
+	}
+
+	await ctx.reply(text.trim(), { parse_mode: 'HTML', reply_markup: backKb('auth') });
+}
+
+function formatCodeDetail(d: db.CodeDetail) {
+	const statusMap = { unused: '🟢 未使用', in_use: '🔵 使用中', expired: '🔴 已过期' };
+	const statusText = statusMap[d.status];
+
+	const totalDuration = d.ttl_seconds > 0 ? formatDuration(d.ttl_seconds) : '无限';
+	const remaining = d.status === 'in_use' && d.remaining_seconds != null
+		? formatDuration(d.remaining_seconds)
+		: d.status === 'expired' ? '已到期' : '未激活';
+
+	const createdAt = d.created_at ? new Date(d.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未知';
+	const activatedAt = d.activated_at ? new Date(d.activated_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未激活';
+	const expiresAt = d.expires_at ? new Date(d.expires_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未设置';
+
 	return [
 		`🔍 <b>授权码详情</b>`,
 		'',
-		`授权码: <code>${code}</code>`,
-		`房间: ${roomName}`,
-		`身份: ${identity}`,
-		`已使用: ${used}`,
-		`已撤销: ${revoked}`,
+		`授权码: <code>${d.code}</code>`,
+		`状态: ${statusText}`,
+		`房间: ${d.room_name || '未绑定'}`,
+		``,
+		`⏱ <b>时间信息</b>`,
+		`总时长: ${totalDuration}`,
+		`剩余时间: ${remaining}`,
+		`创建时间: ${createdAt}`,
+		`激活时间: ${activatedAt}`,
 		`过期时间: ${expiresAt}`,
 	].join('\n');
 }
@@ -635,11 +687,36 @@ export function createAdminBot(): Bot {
 			return;
 		}
 		if (sub === 'totalstats') {
-			const stats = await db.getAllCodesStats();
-			await ctx.reply(
-				`🔢 <b>全平台授权码统计</b>\n\n总数: ${stats.total}\n未使用: ${stats.unused}\n已使用: ${stats.used}`,
-				{ parse_mode: 'HTML', reply_markup: backKb('auth') },
-			);
+			const botStats = await db.getAllCodesStatsByBot();
+			if (botStats.length === 0) {
+				await ctx.reply('🔢 暂无授权码数据', { reply_markup: backKb('auth') });
+				return;
+			}
+			let tTotal = 0, tUsed = 0, tUnused = 0, tExpired = 0;
+			let text = '🔢 <b>全平台授权码统计</b>\n';
+			for (const s of botStats) {
+				text += `\n📱 <b>${s.botName}</b>  (ID:${s.botId})`;
+				text += `\n总数: ${s.total} | 未使用: ${s.unused} | 已使用: ${s.used} | 过期: ${s.expired}\n`;
+				tTotal += s.total; tUsed += s.used; tUnused += s.unused; tExpired += s.expired;
+			}
+			text += `\n━━━━━━━━━━\n合计: ${tTotal} | 未使用: ${tUnused} | 已使用: ${tUsed} | 过期: ${tExpired}`;
+			await ctx.reply(text, { parse_mode: 'HTML', reply_markup: backKb('auth') });
+			return;
+		}
+		if (sub === 'delcodes_botlist') {
+			const bots = await db.getSaleBots();
+			if (bots.length === 0) {
+				await ctx.reply('❌ 暂无用户机器人', { reply_markup: backKb('auth') });
+				return;
+			}
+			const kb = new InlineKeyboard();
+			for (const item of bots) {
+				const codes = await db.getCodesByBot(item.id);
+				kb.text(`${item.bot_name || item.bot_username || '用户机器人'} · ID:${item.id} · ${codes.length}个码`, `adm_delbot:${item.id}`).row();
+			}
+			kb.text('⬅️ 返回', 'adm_cat:auth').text('🏠 主菜单', 'adm_back');
+			await ctx.reply('🗑 请选择要删除授权码的机器人：', { reply_markup: kb });
+			return;
 		}
 	});
 
@@ -767,11 +844,7 @@ export function createAdminBot(): Bot {
 			await ctx.reply('📤 请选择要下发授权码的用户机器人：', { reply_markup: kb });
 			return;
 		}
-		if (sub === 'delcode') {
-			setState(userId, 'wait_delcode');
-			await ctx.reply('🗑 请发送要删除的授权码');
-			return;
-		}
+
 		if (sub === 'codeinfo') {
 			setState(userId, 'wait_codeinfo');
 			await ctx.reply('🔍 请发送要查询的授权码');
@@ -797,6 +870,43 @@ export function createAdminBot(): Bot {
 		await ctx.reply(`📤 已选择机器人 ID: ${botId}\n\n请发送：数量 小时\n例：10 12`, {
 			reply_markup: backKb('auth'),
 		});
+	});
+
+	// 删除授权码 - 选择机器人后显示删除单个/全部
+	bot.callbackQuery(/^adm_delbot:(\d+)$/, async (ctx) => {
+		const userId = ctx.from?.id;
+		if (!userId || !(await db.isAdmin(userId))) return;
+		await ctx.answerCallbackQuery();
+		const botId = Number(ctx.match[1]);
+		const codes = await db.getCodesByBot(botId);
+		const kb = new InlineKeyboard()
+			.text('🗑 删除单个', `adm_delsingle:${botId}`)
+			.text('🗑 全部删除', `adm_delall:${botId}`)
+			.row()
+			.text('⬅️ 返回', 'adm_do:delcodes_botlist')
+			.text('🏠 主菜单', 'adm_back');
+		await ctx.reply(`🗑 机器人 ID: ${botId}\n当前授权码数量: ${codes.length}\n\n请选择删除方式：`, { reply_markup: kb });
+	});
+
+	bot.callbackQuery(/^adm_delsingle:(\d+)$/, async (ctx) => {
+		const userId = ctx.from?.id;
+		if (!userId || !(await db.isAdmin(userId))) return;
+		await ctx.answerCallbackQuery();
+		const botId = Number(ctx.match[1]);
+		setState(userId, 'wait_delcode', botId);
+		await ctx.reply(`🗑 已选择机器人 ID: ${botId}\n请发送要删除的授权码：`, { reply_markup: backKb('auth') });
+	});
+
+	bot.callbackQuery(/^adm_delall:(\d+)$/, async (ctx) => {
+		const userId = ctx.from?.id;
+		if (!userId || !(await db.isAdmin(userId))) return;
+		await ctx.answerCallbackQuery();
+		const botId = Number(ctx.match[1]);
+		const deleted = await db.deleteAllBotCodes(botId);
+		await ctx.reply(deleted > 0 ? `✅ 已删除机器人 ${botId} 下的全部 ${deleted} 个授权码` : '❌ 该机器人下没有授权码', { reply_markup: backKb('auth') });
+		if (deleted > 0) {
+			await notifyRoots(bot, userId, '批量删除授权码', [`机器人ID: <code>${botId}</code>`, `删除数量: ${deleted}`]);
+		}
 	});
 
 	bot.callbackQuery(/^adm_delapiurl:(.+)$/, async (ctx) => {
@@ -1093,12 +1203,12 @@ export function createAdminBot(): Bot {
 		}
 
 		if (state.action === 'wait_codeinfo') {
-			const info = await api.getInviteInfo(text);
-			if (!info) {
+			const detail = await db.getCodeDetail(text);
+			if (!detail) {
 				await ctx.reply('❌ 未找到该授权码', { reply_markup: backKb('auth') });
 				return;
 			}
-			await ctx.reply(formatInviteInfo(info), { parse_mode: 'HTML', reply_markup: backKb('auth') });
+			await ctx.reply(formatCodeDetail(detail), { parse_mode: 'HTML', reply_markup: backKb('auth') });
 			return;
 		}
 

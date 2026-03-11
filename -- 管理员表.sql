@@ -119,3 +119,38 @@ INSERT INTO tg_settings (key, value) VALUES
 2️⃣ 授权码从第一次进入会议开始计时，有效时间 12 小时，过期作废
 3️⃣ 授权码一码一房间，会议结束后可再次开设房间')
 ON CONFLICT (key) DO NOTHING;
+
+-- ==================== HUIYI_API 数据库表（另一个 Supabase） ====================
+
+-- 邀请码表
+CREATE TABLE IF NOT EXISTS invite_codes (
+  id SERIAL PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  room_name TEXT,
+  identity TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  activated_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ,
+  ttl_seconds INTEGER NOT NULL DEFAULT 3600,
+  max_participants INTEGER NOT NULL DEFAULT 2,
+  used BOOLEAN NOT NULL DEFAULT false,
+  revoked BOOLEAN NOT NULL DEFAULT false
+);
+
+-- 健康状态表
+CREATE TABLE IF NOT EXISTS health_state (
+  id TEXT PRIMARY KEY,
+  healthy BOOLEAN NOT NULL DEFAULT true,
+  active_primary BOOLEAN NOT NULL DEFAULT true,
+  last_checked TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- RLS
+ALTER TABLE invite_codes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE health_state ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "service_all" ON invite_codes;
+DROP POLICY IF EXISTS "service_all" ON health_state;
+
+CREATE POLICY "service_all" ON invite_codes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "service_all" ON health_state FOR ALL USING (true) WITH CHECK (true);

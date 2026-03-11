@@ -354,16 +354,162 @@ export async function unbindBotUser(botId: number, telegramId: number): Promise<
   return !error;
 }
 
-export async function getAllCodesStats(): Promise<{ total: number; used: number; unused: number }> {
-  const { data } = await supabase.from('tg_user_codes').select('used');
-  if (!data) return { total: 0, used: 0, unused: 0 };
-  const used = data.filter((d) => d.used).length;
-  return { total: data.length, used, unused: data.length - used };
+export interface BotCodeStats {
+  botId: number;
+  botName: string;
+  total: number;
+  used: number;
+  unused: number;
+  expired: number;
+}
+
+export async function getAllCodesStatsByBot(): Promise<BotCodeStats[]> {
+  const bots = await getSaleBots();
+  const result: BotCodeStats[] = [];
+  const now = new Date();
+
+  for (const bot of bots) {
+    const codes = await getBotCodes(bot.id);
+    const total = codes.length;
+    if (total === 0) {
+      result.push({ botId: bot.id, botName: bot.bot_name || bot.bot_username || '未知', total: 0, used: 0, unused: 0, expired: 0 });
+      continue;
+    }
+
+    const codeStrings = codes.map((c) => c.code);
+    const { data: invites } = await supabase
+      .from('invite_codes')
+      .select('code, used, expires_at')
+      .in('code', codeStrings);
+
+    let used = 0;
+    let expired = 0;
+
+    if (invites && invites.length > 0) {
+      const inviteMap = new Map(invites.map((i: any) => [i.code, i]));
+      for (const c of codes) {
+        const inv = inviteMap.get(c.code);
+        if (inv) {
+          if (inv.used) { used++; }
+          else if (inv.expires_at && new Date(inv.expires_at) < now) { expired++; }
+        } else {
+          if (c.used) used++;
+        }
+      }
+    } else {
+      used = codes.filter((c) => c.used).length;
+    }
+
+    result.push({
+      botId: bot.id,
+      botName: bot.bot_name || bot.bot_username || '未知',
+      total,
+      used,
+      unused: total - used - expired,
+      expired,
+    });
+  }
+
+  return result;
+}
+
+// ==================== 授权码详情 ====================
+
+export interface CodeDetail {
+  code: string;
+  room_name: string | null;
+  activated_at: string | null;
+  expires_at: string | null;
+  ttl_seconds: number;
+  created_at: string;
+  status: 'unused' | 'in_use' | 'expired';
+  remaining_seconds: number | null;
+}
+
+export async function getBotCodesDetail(botId: number): Promise<CodeDetail[]> {
+  const codes = await getBotCodes(botId);
+  if (codes.length === 0) return [];
+
+  const codeStrings = codes.map((c) => c.code);
+  const { data: invites } = await supabase
+    .from('invite_codes')
+    .select('*')
+    .in('code', codeStrings);
+
+  const inviteMap = new Map((invites || []).map((i: any) => [i.code, i]));
+  const now = Date.now();
+  const result: CodeDetail[] = [];
+
+  for (const c of codes) {
+    const inv = inviteMap.get(c.code);
+    if (inv) {
+      const expiresAt = inv.expires_at ? new Date(inv.expires_at).getTime() : null;
+      const isExpired = expiresAt !== null && expiresAt <= now;
+      const isInUse = !!inv.room_name && !isExpired;
+      result.push({
+        code: c.code,
+        room_name: inv.room_name,
+        activated_at: inv.activated_at,
+        expires_at: inv.expires_at,
+        ttl_seconds: inv.ttl_seconds,
+        created_at: inv.created_at,
+        status: isExpired ? 'expired' : isInUse ? 'in_use' : 'unused',
+        remaining_seconds: expiresAt ? Math.max(0, Math.floor((expiresAt - now) / 1000)) : null,
+      });
+    } else {
+      result.push({
+        code: c.code,
+        room_name: c.room_name,
+        activated_at: null,
+        expires_at: null,
+        ttl_seconds: 0,
+        created_at: c.created_at,
+        status: c.used ? 'in_use' : 'unused',
+        remaining_seconds: null,
+      });
+    }
+  }
+
+  return result;
+}
+
+export async function getCodeDetail(code: string): Promise<CodeDetail | null> {
+  const normalized = code.trim().toUpperCase();
+  const { data } = await supabase
+    .from('invite_codes')
+    .select('*')
+    .eq('code', normalized)
+    .maybeSingle();
+
+  if (!data) return null;
+
+  const now = Date.now();
+  const expiresAt = data.expires_at ? new Date(data.expires_at).getTime() : null;
+  const isExpired = expiresAt !== null && expiresAt <= now;
+  const isInUse = !!data.room_name && !isExpired;
+
+  return {
+    code: data.code,
+    room_name: data.room_name,
+    activated_at: data.activated_at,
+    expires_at: data.expires_at,
+    ttl_seconds: data.ttl_seconds,
+    created_at: data.created_at,
+    status: isExpired ? 'expired' : isInUse ? 'in_use' : 'unused',
+    remaining_seconds: expiresAt ? Math.max(0, Math.floor((expiresAt - now) / 1000)) : null,
+  };
 }
 
 export async function deleteUserCode(code: string): Promise<boolean> {
   const { error } = await supabase.from('tg_user_codes').delete().eq('code', code);
   return !error;
+}
+
+export async function deleteAllBotCodes(botId: number): Promise<number> {
+  const { data } = await supabase.from('tg_user_codes').select('code').eq('bot_id', botId);
+  if (!data || data.length === 0) return 0;
+  const { error } = await supabase.from('tg_user_codes').delete().eq('bot_id', botId);
+  return error ? 0 : data.length;
 }
 
 // ==================== 设置 ====================
