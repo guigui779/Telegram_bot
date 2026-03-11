@@ -366,7 +366,7 @@ export interface BotCodeStats {
 export async function getAllCodesStatsByBot(): Promise<BotCodeStats[]> {
   const bots = await getSaleBots();
   const result: BotCodeStats[] = [];
-  const now = new Date();
+  const now = Date.now();
 
   for (const bot of bots) {
     const codes = await getBotCodes(bot.id);
@@ -376,10 +376,10 @@ export async function getAllCodesStatsByBot(): Promise<BotCodeStats[]> {
       continue;
     }
 
-    const codeStrings = codes.map((c) => c.code);
+    const codeStrings = codes.map((c) => c.code.trim().toUpperCase());
     const { data: invites } = await supabase
       .from('invite_codes')
-      .select('code, used, expires_at')
+      .select('code, room_name, activated_at, expires_at')
       .in('code', codeStrings);
 
     let used = 0;
@@ -388,10 +388,13 @@ export async function getAllCodesStatsByBot(): Promise<BotCodeStats[]> {
     if (invites && invites.length > 0) {
       const inviteMap = new Map(invites.map((i: any) => [i.code, i]));
       for (const c of codes) {
-        const inv = inviteMap.get(c.code);
+        const inv = inviteMap.get(c.code.trim().toUpperCase());
         if (inv) {
-          if (inv.used) { used++; }
-          else if (inv.expires_at && new Date(inv.expires_at) < now) { expired++; }
+          const expiresAt = inv.expires_at ? new Date(inv.expires_at).getTime() : null;
+          const isExpired = expiresAt !== null && expiresAt <= now;
+          const isInUse = !!inv.room_name && !isExpired;
+          if (isExpired) { expired++; }
+          else if (isInUse || inv.activated_at) { used++; }
         } else {
           if (c.used) used++;
         }
@@ -430,7 +433,7 @@ export async function getBotCodesDetail(botId: number): Promise<CodeDetail[]> {
   const codes = await getBotCodes(botId);
   if (codes.length === 0) return [];
 
-  const codeStrings = codes.map((c) => c.code);
+  const codeStrings = codes.map((c) => c.code.trim().toUpperCase());
   const { data: invites } = await supabase
     .from('invite_codes')
     .select('*')

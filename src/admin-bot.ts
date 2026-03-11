@@ -397,7 +397,7 @@ async function showRooms(ctx: any) {
 	await ctx.reply(text.trim(), { parse_mode: 'HTML', reply_markup: backKb('bot') });
 }
 
-async function showHealth(ctx: any, manual = false) {
+async function showHealth(ctx: any, manual = false): Promise<string | null> {
 	const currentUrl = ((await db.getSetting('api_url')) || '').replace(/\/$/, '');
 	const backupSettings = await db.getSettingsByPrefix('api_url_backup');
 
@@ -410,6 +410,7 @@ async function showHealth(ctx: any, manual = false) {
 		`   状态: ${currentHealthy ? '✅ 正常' : '❌ 异常'}`,
 	];
 
+	const backupResults: { url: string; healthy: boolean; key: string }[] = [];
 	if (backupSettings.length === 0) {
 		lines.push('', '🔸 备用接口: 未设置');
 	} else {
@@ -417,7 +418,25 @@ async function showHealth(ctx: any, manual = false) {
 			const url = item.value.replace(/\/$/, '');
 			if (!url) continue;
 			const healthy = await api.checkUrlHealth(url, manual);
+			backupResults.push({ url, healthy, key: item.key });
 			lines.push('', `🔸 备用接口: ${url}`, `   状态: ${healthy ? '✅ 正常' : '❌ 异常'}`);
+		}
+	}
+
+	// 当前接口异常时，自动切换到第一个正常的备用接口
+	let switchedUrl: string | null = null;
+	if (!currentHealthy && manual) {
+		const healthyBackup = backupResults.find((b) => b.healthy);
+		if (healthyBackup) {
+			await db.setSetting('api_url', healthyBackup.url);
+			switchedUrl = healthyBackup.url;
+			lines.push(
+				'',
+				'⚠️ <b>当前接口异常，已自动切换！</b>',
+				`✅ 已切换到: ${healthyBackup.url}`,
+			);
+		} else {
+			lines.push('', '⚠️ <b>当前接口异常，且无可用备用接口！</b>');
 		}
 	}
 
@@ -427,6 +446,7 @@ async function showHealth(ctx: any, manual = false) {
 		.text('⬅️ 返回', 'adm_cat:admin')
 		.text('🏠 主菜单', 'adm_back');
 	await ctx.reply(lines.join('\n'), { parse_mode: 'HTML', reply_markup: kb });
+	return switchedUrl;
 }
 
 async function showRecordings(ctx: any) {
@@ -642,6 +662,7 @@ export function createAdminBot(): Bot {
 			return;
 		}
 		if (sub === 'health') {
+			await ctx.reply('⏳ 正在检测接口状态...');
 			await showHealth(ctx, false);
 			return;
 		}
@@ -679,7 +700,11 @@ export function createAdminBot(): Bot {
 			return;
 		}
 		if (sub === 'healthcheck') {
-			await showHealth(ctx, true);
+			await ctx.reply('⏳ 正在巡检所有接口...');
+			const switchedUrl = await showHealth(ctx, true);
+			if (switchedUrl) {
+				await ctx.reply(`🚨 <b>接口已切换</b>\n\n当前接口已切换为:\n<code>${switchedUrl}</code>`, { parse_mode: 'HTML' });
+			}
 			return;
 		}
 		if (sub === 'recordings') {
@@ -1135,18 +1160,29 @@ export function createAdminBot(): Bot {
 		}
 
 		if (state.action === 'wait_startrecord') {
-			const [roomName, outputFile] = text.split(/\s+/);
-			if (!roomName) {
-				await ctx.reply('❌ 请输入房间名', { reply_markup: backKb('admin') });
+			const code = text.trim();
+			if (!code) {
+				await ctx.reply('❌ 请输入授权码', { reply_markup: backKb('admin') });
 				return;
 			}
-			const result = await api.startRecording(roomName, outputFile);
-			await ctx.reply(result ? `✅ 录制已开始\n房间: ${roomName}\nEgress: <code>${result.egressId}</code>` : '❌ 开始录制失败', {
+			const detail = await db.getCodeDetail(code);
+			if (!detail) {
+				await ctx.reply('❌ 未找到该授权码', { reply_markup: backKb('admin') });
+				return;
+			}
+			if (!detail.room_name) {
+				await ctx.reply('❌ 该授权码未绑定房间，无法录制', { reply_markup: backKb('admin') });
+				return;
+			}
+			const roomName = detail.room_name;
+			const result = await api.startRecording(roomName);
+			await ctx.reply(result ? `✅ 录制已开始\n授权码: <code>${code}</code>\n房间: ${roomName}\nEgress: <code>${result.egressId}</code>` : '❌ 开始录制失败', {
 				parse_mode: 'HTML',
 				reply_markup: backKb('admin'),
 			});
 			if (result) {
 				await notifyRoots(bot, userId, '开始录制', [
+					`授权码: <code>${code}</code>`,
 					`房间名: <code>${roomName}</code>`,
 					`Egress: <code>${result.egressId}</code>`,
 				]);
