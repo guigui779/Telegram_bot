@@ -12,6 +12,19 @@ async function getApiBaseUrls(): Promise<{ primary: string; backup: string }> {
   return { primary, backup };
 }
 
+/** 获取所有接口地址（当前+所有备用） */
+async function getAllApiUrls(): Promise<string[]> {
+  const primary = ((await db.getSetting('api_url')) || '').replace(/\/$/, '');
+  const backups = await db.getSettingsByPrefix('api_url_backup');
+  const urls: string[] = [];
+  if (primary) urls.push(primary);
+  for (const b of backups) {
+    const url = b.value.replace(/\/$/, '');
+    if (url && !urls.includes(url)) urls.push(url);
+  }
+  return urls;
+}
+
 async function requestApi(path: string, init?: RequestInit): Promise<Response> {
   const { primary, backup } = await getApiBaseUrls();
   try {
@@ -28,7 +41,7 @@ export async function createInviteCode(ttlSeconds?: number): Promise<{ code: str
     const res = await requestApi(`/api/invite`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ ttlSeconds: ttlSeconds || 43200 }), // 默认12小时
+      body: JSON.stringify({ ttlSeconds: ttlSeconds || 43200 }),
     });
     if (!res.ok) return null;
     return (await res.json()) as { code: string };

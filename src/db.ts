@@ -444,7 +444,7 @@ export async function getBotCodesDetail(botId: number): Promise<CodeDetail[]> {
   const result: CodeDetail[] = [];
 
   for (const c of codes) {
-    const inv = inviteMap.get(c.code);
+    const inv = inviteMap.get(c.code.trim().toUpperCase());
     if (inv) {
       const expiresAt = inv.expires_at ? new Date(inv.expires_at).getTime() : null;
       const isExpired = expiresAt !== null && expiresAt <= now;
